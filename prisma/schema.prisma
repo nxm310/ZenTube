@@ -1,0 +1,115 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// NextAuth standard models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id             String            @id @default(cuid())
+  name           String?
+  email          String?           @unique
+  emailVerified  DateTime?
+  image          String?
+  accounts       Account[]
+  sessions       Session[]
+  preferences    UserPreference?
+  topicPillars   TopicPillar[]
+  watchedCache   WatchedVideo[]
+  interactions   FeedInteraction[]
+  oneShotHistory OneShotSearch[]
+  createdAt      DateTime          @default(now())
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model UserPreference {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serendipityRatio Int      @default(30) // 0% (pure familiarité/abos) à 100% (pure découverte)
+  cleanTitles      Boolean  @default(true) // Nettoyage du clickbait (majuscules, emojis abusifs)
+  maxDurationMins  Int?     // Durée max optionnelle
+  minDurationMins  Int?     // Durée min optionnelle (exclure shorts < 3 min)
+  updatedAt        DateTime @updatedAt
+}
+
+model TopicPillar {
+  id           String            @id @default(cuid())
+  userId       String
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String            // Ex: "Architecture Logicielle", "Astronomie", "Lo-Fi"
+  keywords     String[]          // Mots-clés de recherche
+  weight       Float             @default(1.0) // Importance dans l'algorithme
+  pausedUntil  DateTime?         // Mise en pause temporaire (ex: 7 jours)
+  createdAt    DateTime          @default(now())
+  interactions FeedInteraction[]
+}
+
+model WatchedVideo {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  youtubeId  String
+  channelId  String?
+  watchedAt  DateTime @default(now())
+
+  @@unique([userId, youtubeId])
+  @@index([userId, watchedAt])
+}
+
+model FeedInteraction {
+  id         String       @id @default(cuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  youtubeId  String
+  topicId    String?
+  topic      TopicPillar? @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  type       String       // "LIKE", "REFRESH_TOPIC", "PAUSE_7D", "DISMISS"
+  createdAt  DateTime     @default(now())
+}
+
+model OneShotSearch {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  query     String
+  saved     Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
