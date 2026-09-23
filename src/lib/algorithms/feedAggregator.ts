@@ -45,20 +45,31 @@ export async function generateSmartFeed(userId: string, accessToken?: string): P
   const now = new Date();
 
   // 1. Récupération des préférences utilisateur, piliers actifs et historique des vidéos vues en base
-  const [preferences, activeTopics, watchedVideos] = await Promise.all([
-    prisma.userPreference.findUnique({ where: { userId } }),
-    prisma.topicPillar.findMany({
-      where: {
-        userId,
-        OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
-      },
-      orderBy: { weight: "desc" },
-    }),
-    prisma.watchedVideo.findMany({
-      where: { userId },
-      select: { youtubeId: true },
-    }),
-  ]);
+  let preferences: any = null;
+  let activeTopics: any[] = [];
+  let watchedVideos: any[] = [];
+
+  try {
+    const res = await Promise.all([
+      prisma.userPreference.findUnique({ where: { userId } }).catch(() => null),
+      prisma.topicPillar.findMany({
+        where: {
+          userId,
+          OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
+        },
+        orderBy: { weight: "desc" },
+      }).catch(() => []),
+      prisma.watchedVideo.findMany({
+        where: { userId },
+        select: { youtubeId: true },
+      }).catch(() => []),
+    ]);
+    preferences = res[0];
+    activeTopics = res[1];
+    watchedVideos = res[2];
+  } catch (e) {
+    console.warn("Base de données non disponible, utilisation du mode autonome:", e);
+  }
 
   const watchedSet = new Set(watchedVideos.map((w) => w.youtubeId));
 

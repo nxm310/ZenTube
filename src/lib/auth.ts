@@ -42,9 +42,18 @@ async function refreshGoogleAccessToken(token: any) {
   }
 }
 
+// Vérifier si une vraie base distante est connectée
+const isDatabaseAvailable = Boolean(
+  process.env.DATABASE_URL &&
+  process.env.DATABASE_URL.trim().length > 0 &&
+  !process.env.DATABASE_URL.includes("localhost")
+);
+
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma),
+  // En production, si la base cloud n'est pas encore connectée, NextAuth fonctionne en mode JWT autonome sans crasher
+  adapter: isDatabaseAvailable ? PrismaAdapter(prisma) : undefined,
   session: { strategy: "jwt" },
+  secret: process.env.NEXTAUTH_SECRET || "zentube-prod-secret-9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d",
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID || "",
@@ -63,14 +72,20 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, account, user }) {
       if (account && user) {
         return {
+          ...token,
           accessToken: account.access_token,
           accessTokenExpires: Date.now() + (account.expires_at ?? 3600) * 1000,
           refreshToken: account.refresh_token,
-          user,
+          user: {
+            id: user.id || token.sub,
+            name: user.name,
+            email: user.email,
+            image: user.image,
+          },
         };
       }
 
-      if (Date.now() < (token.accessTokenExpires as number) - 60 * 1000) {
+      if (token.accessTokenExpires && Date.now() < (token.accessTokenExpires as number) - 60 * 1000) {
         return token;
       }
 
@@ -79,6 +94,8 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (token?.user) {
         session.user = token.user as any;
+      } else if (token?.sub) {
+        (session.user as any) = { ...session.user, id: token.sub };
       }
       (session as any).accessToken = token.accessToken;
       (session as any).error = token.error;
@@ -87,5 +104,6 @@ export const authOptions: NextAuthOptions = {
   },
   pages: {
     signIn: "/",
+    error: "/",
   },
 };
