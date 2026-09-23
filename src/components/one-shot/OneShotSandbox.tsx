@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   Search,
   PlusCircle,
@@ -14,6 +14,7 @@ import {
   Flame,
   Clock,
   Sparkles,
+  ArrowUp,
 } from "lucide-react";
 import { OneShotVideo } from "@/types";
 import { parseRelativeDateToTimestamp } from "@/lib/utils/date";
@@ -25,8 +26,18 @@ export function OneShotSandbox() {
   const [isLoading, setIsLoading] = useState(false);
   const [savedVideos, setSavedVideos] = useState<Set<string>>(new Set());
 
+  // Référence vers le lecteur pour le scroll automatique
+  const playerRef = useRef<HTMLDivElement>(null);
+
   // Tri dans le One-Shot
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "relevance" | "views">("date_desc");
+
+  // Défilement automatique vers le lecteur dès qu'une vidéo est sélectionnée
+  useEffect(() => {
+    if (activeVideo && playerRef.current) {
+      playerRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [activeVideo]);
 
   const executeSearch = async (searchTerm: string, sortParam?: string) => {
     if (!searchTerm.trim()) return;
@@ -55,9 +66,20 @@ export function OneShotSandbox() {
     executeSearch(term);
   };
 
+  const handleSelectVideo = (video: OneShotVideo) => {
+    setActiveVideo(video);
+    // Double garantie de repositionnement immédiat
+    setTimeout(() => {
+      playerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 50);
+  };
+
+  const scrollToPlayer = () => {
+    playerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
   const handleSortChange = (newSort: "date_desc" | "date_asc" | "relevance" | "views") => {
     setSortBy(newSort);
-    // Si c'est un tri YouTube natif (date ou vues) et qu'on a déjà une recherche, on ré-interroge pour avoir les meilleurs résultats
     if (query.trim()) {
       const apiSort = newSort === "date_desc" ? "date" : newSort === "views" ? "views" : "relevance";
       executeSearch(query, apiSort);
@@ -101,7 +123,7 @@ export function OneShotSandbox() {
   ];
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto">
+    <div className="flex flex-col gap-6 max-w-5xl mx-auto relative">
       {/* Alerte d'isolation stricte */}
       <div className="flex items-start sm:items-center gap-3.5 p-4 bg-emerald-950/40 border border-emerald-800/60 rounded-2xl text-emerald-300 text-sm backdrop-blur-sm">
         <ShieldCheck className="w-5 h-5 flex-shrink-0 text-emerald-400 mt-0.5 sm:mt-0" />
@@ -237,12 +259,16 @@ export function OneShotSandbox() {
         </div>
       )}
 
-      {/* Lecteur Sandboxé (Isolé de l'historique Google) */}
+      {/* Lecteur Sandboxé avec référence de défilement automatique */}
       {activeVideo && (
-        <div className="relative bg-black rounded-2xl overflow-hidden shadow-2xl border border-zinc-800 animate-in fade-in zoom-in-95 duration-200">
+        <div
+          ref={playerRef}
+          className="relative bg-black rounded-2xl overflow-hidden shadow-2xl border-2 border-emerald-500/80 animate-in fade-in zoom-in-95 duration-200 scroll-mt-20"
+        >
           <div className="flex items-center justify-between px-4 py-3 bg-zinc-900/90 border-b border-zinc-800 text-xs">
             <div className="flex items-center gap-2 truncate pr-4">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-semibold text-emerald-300">En cours de lecture :</span>
               <span className="font-medium text-zinc-200 truncate">{activeVideo.title}</span>
               <span className="text-zinc-500">• {activeVideo.channelTitle}</span>
             </div>
@@ -264,6 +290,18 @@ export function OneShotSandbox() {
             />
           </div>
         </div>
+      )}
+
+      {/* Bouton flottant pour revenir au lecteur si la vidéo est en cours et qu'on a scrollé */}
+      {activeVideo && (
+        <button
+          onClick={scrollToPlayer}
+          className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-2xl shadow-emerald-950/80 border border-emerald-400/40 animate-in slide-in-from-bottom-4 duration-300"
+          title="Remonter au lecteur vidéo"
+        >
+          <ArrowUp className="w-4 h-4" />
+          <span>Revenir au lecteur</span>
+        </button>
       )}
 
       {/* Indicateur de chargement */}
@@ -290,7 +328,7 @@ export function OneShotSandbox() {
               >
                 <div
                   className="relative aspect-video cursor-pointer group bg-zinc-950 overflow-hidden"
-                  onClick={() => setActiveVideo(video)}
+                  onClick={() => handleSelectVideo(video)}
                 >
                   <img
                     src={video.thumbnailUrl}
@@ -309,7 +347,7 @@ export function OneShotSandbox() {
                   <div>
                     <h3
                       className="font-medium text-zinc-100 text-sm line-clamp-2 cursor-pointer hover:text-emerald-400 transition-colors"
-                      onClick={() => setActiveVideo(video)}
+                      onClick={() => handleSelectVideo(video)}
                     >
                       {video.title}
                     </h3>

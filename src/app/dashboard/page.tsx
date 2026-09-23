@@ -76,6 +76,18 @@ export default function DashboardPage() {
     fetchFeed();
   }, [session]);
 
+  // Bloquer le scroll d'arrière-plan quand la vidéo est ouverte dans le modal pour rester centré
+  useEffect(() => {
+    if (activeVideo) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "auto";
+    }
+    return () => {
+      document.body.style.overflow = "auto";
+    };
+  }, [activeVideo]);
+
   const handleSearchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
