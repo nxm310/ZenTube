@@ -25,6 +25,7 @@ import {
   ArrowUpDown,
   CheckCircle2,
   Eye,
+  ArrowLeft,
 } from "lucide-react";
 import Link from "next/link";
 import { PRESET_CATEGORIES, detectCategory } from "@/lib/utils/categories";
@@ -50,6 +51,37 @@ export default function DashboardPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [addedPillars, setAddedPillars] = useState<Set<string>>(new Set());
+
+  // 1. Restaurer la recherche depuis la session si existante
+  useEffect(() => {
+    try {
+      const cached = sessionStorage.getItem("zentube_dashboard_search");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.searchQuery) setSearchQuery(parsed.searchQuery);
+        if (parsed.searchResults && parsed.searchResults.length > 0) {
+          setSearchResults(parsed.searchResults);
+          setHasSearched(true);
+        }
+      }
+    } catch (e) {
+      console.warn("Erreur lecture cache session dashboard:", e);
+    }
+  }, []);
+
+  // 2. Sauvegarder la recherche dans la session
+  useEffect(() => {
+    if (hasSearched && searchResults.length > 0) {
+      try {
+        sessionStorage.setItem(
+          "zentube_dashboard_search",
+          JSON.stringify({ searchQuery, searchResults })
+        );
+      } catch (e) {
+        console.warn("Erreur écriture cache session dashboard:", e);
+      }
+    }
+  }, [hasSearched, searchResults, searchQuery]);
 
   const fetchFeed = async () => {
     setIsLoading(true);
@@ -88,6 +120,44 @@ export default function DashboardPage() {
     };
   }, [activeVideo]);
 
+  // Fermer le lecteur modal lors du clic sur le bouton Précédent/Retour du navigateur ou la touche Échap
+  useEffect(() => {
+    const handlePopState = () => {
+      if (activeVideo) {
+        setActiveVideo(null);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && activeVideo) {
+        closeVideoModal();
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeVideo]);
+
+  const openVideoModal = (v: { id: string; title: string }) => {
+    setActiveVideo(v);
+    if (!window.history.state?.modalOpen) {
+      window.history.pushState({ modalOpen: true, videoId: v.id }, "");
+    } else {
+      window.history.replaceState({ modalOpen: true, videoId: v.id }, "");
+    }
+  };
+
+  const closeVideoModal = () => {
+    setActiveVideo(null);
+    if (window.history.state?.modalOpen) {
+      window.history.back();
+    }
+  };
+
   const handleSearchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -109,6 +179,7 @@ export default function DashboardPage() {
     setSearchQuery("");
     setSearchResults([]);
     setHasSearched(false);
+    sessionStorage.removeItem("zentube_dashboard_search");
   };
 
   const handleAddAsTopic = async (title: string) => {
@@ -425,15 +496,25 @@ export default function DashboardPage() {
       {/* Lecteur Modal si vidéo sélectionnée */}
       {activeVideo && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="relative bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <div className="relative bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 gap-2">
               <h3 className="text-sm font-medium text-zinc-200 truncate pr-4">{activeVideo.title}</h3>
-              <button
-                onClick={() => setActiveVideo(null)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={closeVideoModal}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white font-medium transition-colors border border-zinc-700 text-xs shadow-sm"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Fermer le lecteur & rester sur la recherche</span>
+                </button>
+                <button
+                  onClick={closeVideoModal}
+                  className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors"
+                  title="Fermer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             <div className="aspect-video w-full bg-black">
               <iframe
@@ -505,7 +586,7 @@ export default function DashboardPage() {
                 >
                   <div
                     className="relative aspect-video w-full bg-zinc-950 cursor-pointer overflow-hidden"
-                    onClick={() => setActiveVideo(video)}
+                    onClick={() => openVideoModal(video)}
                   >
                     <img
                       src={video.thumbnailUrl}
@@ -523,7 +604,7 @@ export default function DashboardPage() {
                     <div>
                       <h3
                         className="font-medium text-zinc-100 text-sm leading-snug line-clamp-2 cursor-pointer hover:text-emerald-400 transition-colors"
-                        onClick={() => setActiveVideo(video)}
+                        onClick={() => openVideoModal(video)}
                       >
                         {video.title}
                       </h3>
@@ -535,7 +616,7 @@ export default function DashboardPage() {
 
                     <div className="pt-2 border-t border-zinc-800/70 flex items-center justify-between">
                       <button
-                        onClick={() => setActiveVideo(video)}
+                        onClick={() => openVideoModal(video)}
                         className="text-xs text-emerald-400 hover:text-emerald-300 font-medium"
                       >
                         Regarder en mode Zen
@@ -577,7 +658,7 @@ export default function DashboardPage() {
                   key={video.id}
                   video={video}
                   onInteract={handleInteract}
-                  onPlay={(v) => setActiveVideo(v)}
+                  onPlay={(v) => openVideoModal(v)}
                 />
               ))}
             </div>

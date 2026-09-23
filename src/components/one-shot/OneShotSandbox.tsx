@@ -15,6 +15,7 @@ import {
   Clock,
   Sparkles,
   ArrowUp,
+  ArrowLeft,
 } from "lucide-react";
 import { OneShotVideo } from "@/types";
 import { parseRelativeDateToTimestamp } from "@/lib/utils/date";
@@ -25,6 +26,7 @@ export function OneShotSandbox() {
   const [activeVideo, setActiveVideo] = useState<OneShotVideo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [savedVideos, setSavedVideos] = useState<Set<string>>(new Set());
+  const [lastPlayedId, setLastPlayedId] = useState<string | null>(null);
 
   // Référence vers le lecteur pour le scroll automatique
   const playerRef = useRef<HTMLDivElement>(null);
@@ -32,11 +34,77 @@ export function OneShotSandbox() {
   // Tri dans le One-Shot
   const [sortBy, setSortBy] = useState<"date_desc" | "date_asc" | "relevance" | "views">("date_desc");
 
-  // Défilement automatique vers le lecteur dès qu'une vidéo est sélectionnée
+  // 1. Restaurer la recherche précédente depuis le cache de session
   useEffect(() => {
-    if (activeVideo && playerRef.current) {
-      playerRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    try {
+      const cached = sessionStorage.getItem("zentube_oneshot_cache");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.query) setQuery(parsed.query);
+        if (parsed.results && parsed.results.length > 0) setResults(parsed.results);
+        if (parsed.sortBy) setSortBy(parsed.sortBy);
+      }
+    } catch (e) {
+      console.warn("Erreur lecture cache session:", e);
     }
+  }, []);
+
+  // 2. Sauvegarder la recherche dans la session dès qu'elle est chargée
+  useEffect(() => {
+    if (results.length > 0) {
+      try {
+        sessionStorage.setItem(
+          "zentube_oneshot_cache",
+          JSON.stringify({ query, results, sortBy })
+        );
+      } catch (e) {
+        console.warn("Erreur écriture cache session:", e);
+      }
+    }
+  }, [results, query, sortBy]);
+
+  const scrollToPlayer = () => {
+    if (playerRef.current) {
+      const topOffset = playerRef.current.getBoundingClientRect().top + window.scrollY - 80;
+      window.scrollTo({ top: Math.max(0, topOffset), behavior: "smooth" });
+    }
+  };
+
+  // 3. Défilement automatique vers le lecteur dès qu'une vidéo est sélectionnée
+  useEffect(() => {
+    if (activeVideo) {
+      // Défilement immédiat et réaffirmé pour être sûr d'arriver au lecteur
+      requestAnimationFrame(() => {
+        scrollToPlayer();
+      });
+      const timer = setTimeout(() => {
+        scrollToPlayer();
+      }, 80);
+      return () => clearTimeout(timer);
+    }
+  }, [activeVideo]);
+
+  // 4. Gestion du bouton "Retour" du navigateur et de la touche Échap : fermer le lecteur SANS quitter la recherche
+  useEffect(() => {
+    const handlePopState = () => {
+      // Si une vidéo est ouverte et qu'on clique sur Précédent/Retour du navigateur
+      if (activeVideo) {
+        setActiveVideo(null);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && activeVideo) {
+        handleClosePlayer();
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, [activeVideo]);
 
   const executeSearch = async (searchTerm: string, sortParam?: string) => {
@@ -68,14 +136,30 @@ export function OneShotSandbox() {
 
   const handleSelectVideo = (video: OneShotVideo) => {
     setActiveVideo(video);
-    // Double garantie de repositionnement immédiat
+    setLastPlayedId(video.id);
+
+    // Ajoute un état dans l'historique du navigateur pour que le bouton "Retour" ferme le lecteur au lieu de quitter la recherche
+    if (!window.history.state?.playerOpen) {
+      window.history.pushState({ playerOpen: true, videoId: video.id }, "");
+    } else {
+      window.history.replaceState({ playerOpen: true, videoId: video.id }, "");
+    }
+
+    // Scroll immédiat vers le lecteur
+    requestAnimationFrame(() => {
+      scrollToPlayer();
+    });
     setTimeout(() => {
-      playerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 50);
+      scrollToPlayer();
+    }, 80);
   };
 
-  const scrollToPlayer = () => {
-    playerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  const handleClosePlayer = () => {
+    setActiveVideo(null);
+    // Si l'état playerOpen existe dans l'historique, revenir en arrière pour nettoyer l'historique du navigateur
+    if (window.history.state?.playerOpen) {
+      window.history.back();
+    }
   };
 
   const handleSortChange = (newSort: "date_desc" | "date_asc" | "relevance" | "views") => {
@@ -153,6 +237,7 @@ export function OneShotSandbox() {
               onClick={() => {
                 setQuery("");
                 setResults([]);
+                sessionStorage.removeItem("zentube_oneshot_cache");
               }}
               className="absolute right-3.5 top-3.5 text-zinc-500 hover:text-zinc-300"
             >
@@ -193,7 +278,7 @@ export function OneShotSandbox() {
           <div className="flex items-center gap-2 text-zinc-400">
             <span className="font-semibold text-zinc-200">{sortedResults.length} vidéos trouvées</span>
             <span>•</span>
-            <span className="text-emerald-400">Résultats réels YouTube</span>
+            <span className="text-emerald-400">Résultats conservés</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -265,21 +350,34 @@ export function OneShotSandbox() {
           ref={playerRef}
           className="relative bg-black rounded-2xl overflow-hidden shadow-2xl border-2 border-emerald-500/80 animate-in fade-in zoom-in-95 duration-200 scroll-mt-20"
         >
-          <div className="flex items-center justify-between px-4 py-3 bg-zinc-900/90 border-b border-zinc-800 text-xs">
-            <div className="flex items-center gap-2 truncate pr-4">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="font-semibold text-emerald-300">En cours de lecture :</span>
+          {/* En-tête du lecteur avec bouton RETOUR explicite */}
+          <div className="flex items-center justify-between px-4 py-3 bg-zinc-900/95 border-b border-zinc-800 text-xs gap-3">
+            <div className="flex items-center gap-2 truncate flex-1 pr-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+              <span className="font-semibold text-emerald-300 flex-shrink-0">En cours :</span>
               <span className="font-medium text-zinc-200 truncate">{activeVideo.title}</span>
-              <span className="text-zinc-500">• {activeVideo.channelTitle}</span>
             </div>
-            <button
-              onClick={() => setActiveVideo(null)}
-              className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors flex-shrink-0"
-              title="Fermer le lecteur"
-            >
-              <X className="w-4 h-4" />
-            </button>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Bouton Retour clair pour fermer le lecteur et garder la recherche */}
+              <button
+                onClick={handleClosePlayer}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white font-medium transition-colors border border-zinc-700 text-xs shadow-sm"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Fermer le lecteur & rester sur la recherche</span>
+              </button>
+
+              <button
+                onClick={handleClosePlayer}
+                className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors"
+                title="Fermer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
+
           <div className="aspect-video w-full">
             <iframe
               className="w-full h-full"
@@ -292,7 +390,7 @@ export function OneShotSandbox() {
         </div>
       )}
 
-      {/* Bouton flottant pour revenir au lecteur si la vidéo est en cours et qu'on a scrollé */}
+      {/* Bouton flottant pour remonter au lecteur si la vidéo est ouverte et qu'on a scrollé */}
       {activeVideo && (
         <button
           onClick={scrollToPlayer}
@@ -312,7 +410,7 @@ export function OneShotSandbox() {
         </div>
       )}
 
-      {/* Liste des résultats triés */}
+      {/* Liste des résultats triés (toujours conservée, même après lecture) */}
       {!isLoading && sortedResults.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {sortedResults.map((video) => {
@@ -323,7 +421,11 @@ export function OneShotSandbox() {
               <div
                 key={video.id}
                 className={`flex flex-col bg-zinc-900/60 border rounded-2xl overflow-hidden transition-all duration-200 ${
-                  isPlaying ? "border-emerald-500/80 shadow-md shadow-emerald-950/50" : "border-zinc-800/80 hover:border-zinc-700"
+                  isPlaying
+                    ? "border-emerald-500 shadow-md shadow-emerald-950/50 ring-2 ring-emerald-500/50"
+                    : lastPlayedId === video.id
+                    ? "border-emerald-600/40 bg-zinc-900/80 ring-1 ring-emerald-500/30"
+                    : "border-zinc-800/80 hover:border-zinc-700"
                 }`}
               >
                 <div
@@ -336,6 +438,11 @@ export function OneShotSandbox() {
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     loading="lazy"
                   />
+                  {lastPlayedId === video.id && !isPlaying && (
+                    <span className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-zinc-900/90 border border-emerald-500/60 text-emerald-400 text-[10px] font-semibold backdrop-blur-md">
+                      Dernière vidéo consultée
+                    </span>
+                  )}
                   <div className="absolute inset-0 bg-black/25 group-hover:bg-black/10 transition-colors flex items-center justify-center">
                     <div className="w-11 h-11 rounded-full bg-emerald-600/90 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
                       ▶
